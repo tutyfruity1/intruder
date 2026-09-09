@@ -1,11 +1,25 @@
 import crypto from "node:crypto";
 import http from "node:http";
 import https from "node:https";
+import zlib from "node:zlib";
 import { validateRequestUrl, resolveAllowedHost } from "./security.js";
 import type { RequestInput, ResponseData } from "./types.js";
 import { JsonStore } from "./store.js";
 
 export const MAX_BODY = 1024 * 1024;
+
+function decompressBuffer(buffer: Buffer, encoding?: string): Buffer {
+  if (!encoding) return buffer;
+  const enc = encoding.toLowerCase().trim();
+  try {
+    if (enc.includes("gzip")) return zlib.gunzipSync(buffer);
+    if (enc.includes("deflate")) return zlib.inflateSync(buffer);
+    if (enc.includes("br") || enc.includes("brotli")) return zlib.brotliDecompressSync(buffer);
+  } catch {
+    return buffer;
+  }
+  return buffer;
+}
 
 function requestOnce(url: URL, address: string, request: RequestInput, timeoutMs: number, maxResponseSize: number): Promise<ResponseData> {
   return new Promise((resolve, reject) => {
@@ -33,8 +47,17 @@ function requestOnce(url: URL, address: string, request: RequestInput, timeoutMs
         if (settled) return;
         settled = true;
         const headers: Record<string, string> = {};
-        Object.entries(incoming.headers).forEach(([key, value]) => { headers[key] = Array.isArray(value) ? value.join(", ") : value || ""; });
-        resolve({ status: incoming.statusCode || 0, statusText: incoming.statusMessage || "", headers, body: Buffer.concat(chunks).toString("utf8"), durationMs: Date.now() - started, ...(truncated ? { truncated: true } : {}) });
+        Object.entries(incoming.headers).forEach(([key, value]) => {
+          const lower = key.toLowerCase();
+          if (lower !== "content-encoding" && lower !== "content-length") {
+            headers[key] = Array.isArray(value) ? value.join(", ") : value || "";
+          }
+        });
+        const rawBuffer = Buffer.concat(chunks);
+        const rawEncoding = incoming.headers["content-encoding"];
+        const encodingStr = Array.isArray(rawEncoding) ? rawEncoding[0] : rawEncoding;
+        const decompressed = decompressBuffer(rawBuffer, encodingStr);
+        resolve({ status: incoming.statusCode || 0, statusText: incoming.statusMessage || "", headers, body: decompressed.toString("utf8"), durationMs: Date.now() - started, ...(truncated ? { truncated: true } : {}) });
       };
       incoming.on("data", (chunk: Buffer) => {
         total += chunk.length;

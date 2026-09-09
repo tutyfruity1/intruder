@@ -10,7 +10,7 @@ import type { HttpMethod, RequestInput, TrafficItem } from "./types.js";
 import { CaManager } from "./ca.js";
 
 const methods = new Set<HttpMethod>(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
-const hopByHop = new Set(["connection", "content-length", "transfer-encoding", "proxy-connection", "proxy-authorization", "proxy-authenticate", "keep-alive", "te", "trailer", "upgrade", "host"]);
+const hopByHop = new Set(["connection", "content-length", "transfer-encoding", "proxy-connection", "proxy-authorization", "proxy-authenticate", "keep-alive", "te", "trailer", "upgrade", "host", "content-encoding"]);
 
 function headersFromRequest(req: IncomingMessage): Record<string, string> {
   const headers: Record<string, string> = {};
@@ -56,6 +56,8 @@ function responseHeaders(response: TrafficItem["response"]): Record<string, stri
   const headers = { ...(response?.headers || {}) };
   for (const name of Object.keys(headers)) if (hopByHop.has(name.toLowerCase())) delete headers[name];
   delete headers["content-length"];
+  delete headers["transfer-encoding"];
+  delete headers["content-encoding"];
   return headers;
 }
 
