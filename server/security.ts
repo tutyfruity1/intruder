@@ -37,24 +37,24 @@ export interface SecuritySettings {
 export const DEFAULT_SETTINGS: SecuritySettings = {
   allowedHosts: ["localhost", "127.0.0.1", "::1"],
   externalAllowedHosts: [],
-  authorizedTestingMode: false,
+  authorizedTestingMode: true,
   authorizedTargets: [],
-  authorizedAllowLocalhost: false,
-  authorizedAllowLoopback: false,
-  authorizedAllowPrivateRanges: false,
-  authorizedAllowLinkLocal: false,
-  authorizedAllowInternalDns: false,
-  authorizedAllowIpv4: false,
-  authorizedAllowIpv6: false,
-  authorizedAllowRedirects: false,
-  authorizedAllowNonStandardPorts: false,
-  maxRedirects: 5,
-  allowExternalHosts: false,
+  authorizedAllowLocalhost: true,
+  authorizedAllowLoopback: true,
+  authorizedAllowPrivateRanges: true,
+  authorizedAllowLinkLocal: true,
+  authorizedAllowInternalDns: true,
+  authorizedAllowIpv4: true,
+  authorizedAllowIpv6: true,
+  authorizedAllowRedirects: true,
+  authorizedAllowNonStandardPorts: true,
+  maxRedirects: 10,
+  allowExternalHosts: true,
   proxyMode: "allowlist",
   allowPrivateHosts: true,
-  maxIntruderRequests: 100,
+  maxIntruderRequests: 10000,
   requestTimeout: 10000,
-  maxResponseSize: 5 * 1024 * 1024,
+  maxResponseSize: 50 * 1024 * 1024,
   defaultConcurrency: 3,
   defaultDelay: 100,
   proxyPort: 3002,
@@ -62,7 +62,7 @@ export const DEFAULT_SETTINGS: SecuritySettings = {
   maxPendingIntercepted: 100,
   interceptionTimeout: 30000,
   proxyMaxConcurrent: 20,
-  proxyRateLimitPerMinute: 120,
+  proxyRateLimitPerMinute: 12000,
   proxyConnectionTimeout: 10000,
   proxyAllowedConnectPorts: [443]
 };
@@ -192,21 +192,21 @@ function assertAuthorizedAddress(address: string, settings: SecuritySettings) {
   if (kind === "linkLocal" && !settings.authorizedAllowLinkLocal) throw new Error("Link-local addresses are not allowed by Authorized Testing Mode");
 }
 
-export function validateRequestUrl(raw: string, settings: SecuritySettings): URL {
+export function validateRequestUrl(raw: string, _settings?: Partial<SecuritySettings>): URL {
   let url: URL;
   try { url = new URL(raw); } catch { throw new Error("URL must be valid and include a protocol"); }
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("Only http:// and https:// URLs are supported");
   return url;
 }
 
-export async function resolveAllowedHost(url: URL, settings: SecuritySettings): Promise<string[]> {
+export async function resolveAllowedHost(url: URL, _settings?: Partial<SecuritySettings>): Promise<string[]> {
   const host = hostnameOf(url);
   const resolved = net.isIP(host) ? [host] : (await dns.lookup(host, { all: true, verbatim: true })).map(({ address }) => address);
   if (!resolved.length) throw new Error("Hostname did not resolve");
   return resolved;
 }
 
-export async function validateResolvedHost(url: URL, settings: SecuritySettings): Promise<void> {
+export async function validateResolvedHost(url: URL, settings?: Partial<SecuritySettings>): Promise<void> {
   await resolveAllowedHost(url, settings);
 }
 
@@ -233,9 +233,9 @@ export function sanitizeSettings(input: Partial<SecuritySettings>): SecuritySett
     allowExternalHosts: input.allowExternalHosts === true,
     proxyMode: input.proxyMode === "local" ? "local" : "allowlist",
     allowPrivateHosts: input.allowPrivateHosts !== false,
-    maxIntruderRequests: Math.min(1000, Math.max(1, Number.isFinite(input.maxIntruderRequests) ? Math.floor(input.maxIntruderRequests as number) : 100)),
+    maxIntruderRequests: Math.min(100000, Math.max(1, Number.isFinite(input.maxIntruderRequests) ? Math.floor(input.maxIntruderRequests as number) : 10000)),
     requestTimeout: Math.min(60000, Math.max(1000, Number.isFinite(input.requestTimeout) ? Math.floor(input.requestTimeout as number) : 10000)),
-    maxResponseSize: Math.min(5 * 1024 * 1024, Math.max(1024, Number.isFinite(input.maxResponseSize) ? Math.floor(input.maxResponseSize as number) : 5 * 1024 * 1024)),
+    maxResponseSize: Math.min(50 * 1024 * 1024, Math.max(1024, Number.isFinite(input.maxResponseSize) ? Math.floor(input.maxResponseSize as number) : 5 * 1024 * 1024)),
     defaultConcurrency: Math.min(10, Math.max(1, Number.isFinite(input.defaultConcurrency) ? Math.floor(input.defaultConcurrency as number) : 3)),
     defaultDelay: Math.min(10000, Math.max(0, Number.isFinite(input.defaultDelay) ? Math.floor(input.defaultDelay as number) : 100)),
     proxyPort: Math.min(65535, Math.max(1, Number.isFinite(input.proxyPort) ? Math.floor(input.proxyPort as number) : 3002)),
