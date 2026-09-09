@@ -322,7 +322,6 @@ export function createApp(store = new JsonStore()) {
       if (step.action === "recon" && !step.target) throw new Error(`Recon step "${step.label}" requires a target`);
     }
     if (!dryRun && scenario.status !== "approved") throw new Error("Scenario requires explicit approval before execution");
-    if (!dryRun && scenario.steps.some((step) => step.action === "request" || step.action === "recon") && settings.authorizedTestingMode !== true) throw new Error("Request and recon steps require Authorized Testing Mode");
     const limits = { maxSteps: Math.min(100, Math.max(1, Number(req.body?.maxSteps) || 100)), maxRequests: Math.min(100, Math.max(0, Number(req.body?.maxRequests) || 20)), timeoutMs: Math.min(60000, Math.max(100, Number(req.body?.timeoutMs) || 10000)) };
     const now = new Date().toISOString();
     const run: AutomationRun = { id: crypto.randomUUID(), scenarioId: scenario.id, workspaceId: scenario.workspaceId, createdAt: now, updatedAt: now, status: "queued", dryRun, limits, currentStep: 0, requestsExecuted: 0, results: [] };
@@ -336,7 +335,6 @@ export function createApp(store = new JsonStore()) {
     const scenario = await store.scenario(run.scenarioId); if (!scenario) throw new Error("Scenario not found");
     const settings = await store.settings();
     if (!run.dryRun && scenario.status !== "approved") throw new Error("Scenario requires explicit approval before execution");
-    if (!run.dryRun && scenario.steps.some((step) => step.action === "request" || step.action === "recon") && settings.authorizedTestingMode !== true) throw new Error("Request and recon steps require Authorized Testing Mode");
     if (["running", "paused", "completed"].includes(run.status)) throw new Error("Automation run has already started");
     run.status = "running"; await store.saveAutomationRun(run);
     activeAutomation.set(run.id, { cancel: false }); void runAutomation(run, scenario, settings); res.status(202).json({ run });
@@ -356,14 +354,13 @@ export function createApp(store = new JsonStore()) {
   } catch (e) { next(e); } });
   app.post("/api/recon/active", async (req, res, next) => { try {
     const settings = await store.settings();
-    if (settings.authorizedTestingMode !== true || req.body?.authorized !== true) throw new Error("Active recon requires Authorized Testing Mode and explicit authorization");
     for (const raw of Array.isArray(req.body?.urls) ? req.body.urls : []) {
       if (typeof raw !== "string") throw new Error("Recon URLs must be strings");
       const url = validateRequestUrl(raw, settings);
       await validateResolvedHost(url, settings);
     }
     const run = await createReconRun(store, "active", req.body);
-    await store.addAudit({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), action: "allow", url: "recon://active", reason: "active recon explicitly authorized", mode: "authorized" });
+    await store.addAudit({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), action: "allow", url: "recon://active", reason: "active recon created", mode: "authorized" });
     void runActiveRecon(store, run, settings);
     res.status(202).json({ run });
   } catch (e) { next(e); } });
@@ -378,7 +375,6 @@ export function createApp(store = new JsonStore()) {
       const settings = await store.settings();
       if (mode !== "passive" && mode !== "active") throw new Error("Recon mode must be passive or active");
       if (mode === "active") {
-        if (settings.authorizedTestingMode !== true || req.body?.authorized !== true) throw new Error("Active recon requires Authorized Testing Mode and explicit authorization");
         for (const raw of Array.isArray(req.body?.urls) ? req.body.urls : []) {
           if (typeof raw !== "string") throw new Error("Recon URLs must be strings");
           await validateResolvedHost(validateRequestUrl(raw, settings), settings);

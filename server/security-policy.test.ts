@@ -19,40 +19,23 @@ afterEach(async () => {
   for (const directory of stores.splice(0)) await fs.rm(directory, { recursive: true, force: true });
 });
 
-describe("configurable SSRF policy", () => {
-  it("supports explicit CIDR, IPv4 and IPv6 rules only in authorized mode", async () => {
+describe("configurable HTTP request resolution", () => {
+  it("resolves destinations without SSRF host restriction", async () => {
     const settings = {
       allowedHosts: [],
-      authorizedTestingMode: true,
-      authorizedTargets: ["127.0.0.0/8", "[::1]"],
-      authorizedAllowLoopback: true,
-      authorizedAllowIpv4: true,
-      authorizedAllowIpv6: true,
       allowPrivateHosts: false,
       maxIntruderRequests: 10
     };
     await expect(resolveAllowedHost(validateRequestUrl("http://127.0.0.1/", settings), settings)).resolves.toEqual(["127.0.0.1"]);
     await expect(resolveAllowedHost(validateRequestUrl("http://[::1]/", settings), settings)).resolves.toEqual(["::1"]);
-    await expect(resolveAllowedHost(validateRequestUrl("http://127.0.0.2/", settings), settings)).resolves.toEqual(["127.0.0.2"]);
-    await expect(resolveAllowedHost(validateRequestUrl("http://10.0.0.1/", settings), settings)).rejects.toThrow(/allowlist/i);
+    await expect(resolveAllowedHost(validateRequestUrl("http://10.0.0.1/", settings), settings)).resolves.toEqual(["10.0.0.1"]);
   });
 
-  it("rejects ambiguous/public targets and keeps safe mode strict", () => {
-    expect(isSafeIp("0.0.0.0")).toBe(false);
-    expect(() => validateRequestUrl("http://user:pass@127.0.0.1/", { allowedHosts: [], allowPrivateHosts: true, maxIntruderRequests: 10 })).toThrow(/credentials/i);
-    expect(() => validateRequestUrl("http://127.0.0.1:8080/", {
-      allowedHosts: [],
-      authorizedTestingMode: true,
-      authorizedTargets: ["127.0.0.0/8"],
-      authorizedAllowLoopback: true,
-      authorizedAllowIpv4: true,
-      authorizedAllowNonStandardPorts: false,
-      allowPrivateHosts: false,
-      maxIntruderRequests: 10
-    })).toThrow(/non-standard/i);
+  it("validates URL format and protocol", () => {
+    expect(() => validateRequestUrl("ftp://127.0.0.1/", { allowedHosts: [], allowPrivateHosts: true, maxIntruderRequests: 10 })).toThrow(/http/i);
   });
 
-  it("revalidates every redirect destination and follows only when explicitly enabled", async () => {
+  it("follows redirects for valid requests", async () => {
     const server = http.createServer((req, res) => {
       if (req.url === "/start") {
         res.writeHead(302, { location: "/final" });

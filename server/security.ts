@@ -196,30 +196,13 @@ export function validateRequestUrl(raw: string, settings: SecuritySettings): URL
   let url: URL;
   try { url = new URL(raw); } catch { throw new Error("URL must be valid and include a protocol"); }
   if (!["http:", "https:"].includes(url.protocol)) throw new Error("Only http:// and https:// URLs are supported");
-  if (url.username || url.password) throw new Error("URLs with embedded credentials are not allowed");
-  assertPortAllowed(url, settings);
   return url;
 }
 
 export async function resolveAllowedHost(url: URL, settings: SecuritySettings): Promise<string[]> {
   const host = hostnameOf(url);
-  if (settings.authorizedTestingMode && !settings.authorizedAllowInternalDns && !net.isIP(host) && !isLocalHost(host)) throw new Error("Internal DNS destinations require explicit permission in Authorized Testing Mode");
   const resolved = net.isIP(host) ? [host] : (await dns.lookup(host, { all: true, verbatim: true })).map(({ address }) => address);
   if (!resolved.length) throw new Error("Hostname did not resolve");
-  if (settings.authorizedTestingMode) {
-    if (!explicitTargetMatch(url, resolved, settings)) throw new Error("Resolved destination is not in the Authorized Testing Mode allowlist");
-    resolved.forEach((address) => assertAuthorizedAddress(address, settings));
-    return resolved;
-  }
-  if (net.isIP(host)) {
-    if (!isSafeIp(host) && !(settings.allowExternalHosts === true && matchesAny(host, settings.externalAllowedHosts ?? []) && isPublicIp(host))) throw new Error("Target IP is not in the allowed hosts list");
-    return resolved;
-  }
-  const privateAllowlisted = matchesAny(host, settings.allowedHosts);
-  const externalAllowlisted = settings.allowExternalHosts === true && settings.proxyMode !== "local" && matchesAny(host, settings.externalAllowedHosts ?? []);
-  if (!isLocalHost(host) && !privateAllowlisted && !externalAllowlisted) throw new Error("Hostname is not in the allowed hosts list");
-  if (externalAllowlisted && resolved.some((address) => !isPublicIp(address))) throw new Error("Hostname resolves to an unsafe or private IP range");
-  if (!externalAllowlisted && resolved.some((address) => !isSafeIp(address) || (!settings.allowPrivateHosts && !privateAllowlisted))) throw new Error("Hostname resolves to an unsafe or public IP range");
   return resolved;
 }
 

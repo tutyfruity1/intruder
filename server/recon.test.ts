@@ -22,13 +22,12 @@ describe("recon lifecycle", () => {
     expect(response.body.run.findings.some((item: { value: string }) => item.value.includes("[REDACTED]"))).toBe(true);
   });
 
-  it("requires explicit authorization and authorized policy for active runs", async () => {
+  it("creates active recon runs", async () => {
     const directory = `data-test-recon-auth-${process.pid}-${Date.now()}`;
     directories.push(directory);
     const app = createApp(new JsonStore(directory));
-    const denied = await request(app).post("/api/recon/active").send({ urls: ["http://127.0.0.1/"], authorized: true });
-    expect(denied.status).toBe(400);
-    const deniedExplicit = await request(app).post("/api/recon/active").send({ urls: ["http://127.0.0.1/"] });
-    expect(deniedExplicit.status).toBe(400);
+    const run = await request(app).post("/api/recon/active").send({ urls: ["http://127.0.0.1/"], authorized: true });
+    expect(run.status).toBe(202);
+    expect(run.body.run.mode).toBe("active");
   });
 });

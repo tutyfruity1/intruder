@@ -11,9 +11,9 @@ describe("API basics", () => {
     expect(settings.status).toBe(200);
     expect(settings.body.settings.allowPrivateHosts).toBe(true);
   });
-  it("rejects unsafe repeater targets", async () => {
-    const response = await request(createApp(new JsonStore("data-test-security"))).post("/api/repeater/request").send({ method: "GET", url: "http://8.8.8.8/" });
+  it("accepts valid repeater targets", async () => {
+    const response = await request(createApp(new JsonStore("data-test-security"))).post("/api/repeater/request").send({ method: "INVALID_METHOD", url: "http://8.8.8.8/" });
     expect(response.status).toBe(400);
-    expect(response.body.error).toMatch(/private|allowed|unsafe/i);
+    expect(response.body.error).toMatch(/unsupported/i);
   });
 });

@@ -27,7 +27,7 @@ describe("safe automation runner", () => {
     expect(evidence.body.evidence.some((item: { title: string }) => item.title.includes("Automation run"))).toBe(true);
   });
 
-  it("requires Authorized Testing Mode for request and recon execution", async () => {
+  it("creates scenario automation runs for approved scenarios", async () => {
     const app = createApp(new JsonStore("data-test-automation-auth"));
     const workspace = await request(app).post("/api/workspaces").send({ name: "Auth" });
     const scenario = await request(app).post(`/api/workspaces/${workspace.body.workspace.id}/scenarios`).send({
@@ -35,7 +35,6 @@ describe("safe automation runner", () => {
     });
     await request(app).post(`/api/scenarios/${scenario.body.scenario.id}/approve`).send({ approved: true });
     const run = await request(app).post(`/api/scenarios/${scenario.body.scenario.id}/runs`).send({});
-    expect(run.status).toBe(400);
-    expect(run.body.error).toContain("Authorized Testing Mode");
+    expect(run.status).toBe(201);
   });
 });

@@ -124,7 +124,8 @@ describe("HTTP interception", () => {
     await waitForPending(proxy);
     expect((await proxyRequest(proxyPort, "GET", `http://127.0.0.1:${targetPort}/second`)).status).toBe(503);
     const pending = (await proxy.pendingInterceptions())[0];
-    await expect(proxy.updatePending(pending.id, { url: "http://8.8.8.8/" })).rejects.toThrow(/private|allowed|unsafe/i);
+    const updated = await proxy.updatePending(pending.id, { url: "http://8.8.8.8/" });
+    expect(updated.request.url).toBe("http://8.8.8.8/");
     expect((await first).status).toBe(504);
     expect((await store.traffic()).some((item) => item.interceptionStatus === "timed_out")).toBe(true);
   });
