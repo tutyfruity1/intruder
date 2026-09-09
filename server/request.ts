@@ -19,6 +19,7 @@ function requestOnce(url: URL, address: string, request: RequestInput, timeoutMs
       method: request.method,
       headers: request.headers,
       timeout: timeoutMs,
+      rejectUnauthorized: false,
       lookup: (_hostname, _options, callback) => callback(null, address, address.includes(":") ? 6 : 4)
     };
     if (url.protocol === "https:") options.servername = url.hostname.replace(/^\[|\]$/g, "");
