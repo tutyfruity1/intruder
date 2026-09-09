@@ -1,0 +1,21 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #e8eef8; background: #0a1020; }
+* { box-sizing: border-box; }
+body { margin: 0; min-width: 320px; }
+button, input, textarea, select { font: inherit; }
+textarea { resize: vertical; }
+@layer components {
+  .field { @apply w-full rounded-lg border border-slate-700 bg-slate-950/60 px-3 py-2 text-sm text-slate-100 outline-none transition focus:border-teal-300 focus:ring-1 focus:ring-teal-300; color-scheme: dark; }
+  .label { @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-400; }
+  .card { @apply rounded-xl border border-slate-800 bg-panel/90 p-4 shadow-xl shadow-black/10; }
+  .btn { @apply rounded-lg px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50; }
+  .btn-primary { @apply btn bg-teal-300 text-slate-950 hover:bg-teal-200; }
+  .btn-secondary { @apply btn border border-slate-700 bg-slate-800 text-slate-100 hover:bg-slate-700; }
+  .btn-danger { @apply btn border border-red-900/70 bg-red-950/50 text-red-200 hover:bg-red-900/70; }
+  .method-select { background-color: rgba(6, 78, 59, 0.5) !important; color: #d1fae5 !important; }
+  select.field { color-scheme: dark; }
+  select.field option { background-color: #0f172a; color: #e2e8f0; }
+}

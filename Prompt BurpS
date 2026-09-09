@@ -1,0 +1,571 @@
+Ты — senior full-stack developer и security tooling engineer. Создай полноценное локальное веб-приложение для ручного анализа и повторной отправки HTTP-запросов, вдохновлённое Burp Suite Repeater и упрощённым Intruder.
+
+Цель
+
+Нужно создать инструмент, который запускается локально и открывается в браузере, например:
+
+http://localhost:3000
+
+Пользователь должен иметь возможность:
+
+Вставить HTTP-запрос.
+Отредактировать method, URL, headers, cookies, query parameters и body.
+Отправить запрос.
+Увидеть HTTP response.
+Повторять запрос сколько угодно раз.
+Сохранять историю запросов.
+Копировать запрос из истории обратно в редактор.
+Использовать локальный Intruder для перебора заранее заданного набора тестовых значений.
+Сравнивать результаты запросов.
+
+Инструмент предназначен исключительно для localhost, development environments и систем, на тестирование которых у пользователя есть разрешение.
+
+Стек
+
+Используй:
+
+Frontend: React + TypeScript
+Build tool: Vite
+Styling: Tailwind CSS
+Backend: Node.js + TypeScript
+HTTP client: native fetch либо undici
+API: REST
+Хранение истории: SQLite либо простая локальная база/JSON, если SQLite усложнит проект
+Package manager: npm
+
+Создай monorepo либо понятную структуру:
+
+/client
+/server
+
+Главный интерфейс
+
+Сделай современный security-tool UI в тёмной теме.
+
+Основной экран:
+
+┌──────────────────────────────────────────────────────────────┐
+│ Local HTTP Tester [Settings] │
+├──────────────────────────────────────────────────────────────┤
+│ [GET ▼] [http://localhost:3000/api/users?id=1 ] [Send] │
+├──────────────────────────────────────────────────────────────┤
+│ Request │ Response │
+│ │ │
+│ Headers │ Status: 200 OK │
+│ ───────────────────────────── │ Time: 42 ms │
+│ Host: localhost │ Size: 1.2 KB │
+│ Content-Type: application/json │ │
+│ │ { │
+│ Body │ "id": 1, │
+│ ───────────────────────────── │ "name": "Test" │
+│ {...} │ } │
+│ │ │
+└──────────────────────────────────────────────────────────────┘
+
+Используй tabs:
+
+Repeater
+Intruder
+History
+Settings
+Repeater
+
+Создай полноценный редактор HTTP-запроса.
+
+Поддерживаемые HTTP methods:
+
+GET
+POST
+PUT
+PATCH
+DELETE
+HEAD
+OPTIONS
+
+Поля:
+
+URL
+HTTP method
+Query parameters
+Headers
+Cookies
+Body
+
+Body должен поддерживать как минимум:
+
+JSON
+text
+form-urlencoded
+
+Добавь кнопку:
+
+Send
+
+После отправки показывай:
+
+status code
+status text
+response headers
+response body
+response size
+response time
+
+Для JSON используй syntax highlighting и возможность pretty-print.
+
+Добавь кнопки:
+
+Pretty
+Raw
+Copy
+Clear
+Request editor
+
+Сделай удобный редактор с подсветкой синтаксиса.
+
+Пользователь должен легко менять:
+
+GET /api/users?id=123
+
+на:
+
+GET /api/users?id=456
+
+и повторно отправлять запрос.
+
+Добавь keyboard shortcut:
+
+Ctrl+Enter / Cmd+Enter = Send request.
+
+History
+
+Сохраняй последние запросы.
+
+Для каждого элемента истории показывай:
+
+timestamp
+HTTP method
+URL
+status code
+response time
+
+При клике запрос должен загружаться обратно в Repeater.
+
+Добавь:
+
+Delete
+Clear history
+Copy request
+Intruder
+
+Создай безопасную локальную реализацию Intruder для тестирования собственных endpoints.
+
+Пользователь должен иметь возможность указать позиции для подстановки.
+
+Например:
+
+GET /api/users?id=§123§
+
+Значение между §...§ является payload position.
+
+Также поддержи несколько позиций:
+
+POST /api/login
+
+{
+"username": "§username§",
+"role": "§role§"
+}
+
+Предусмотри режимы:
+
+Sniper
+
+Меняет одну выбранную позицию за раз.
+
+Battering Ram
+
+Один payload применяется ко всем выбранным позициям.
+
+Pitchfork
+
+Несколько payload lists перебираются параллельно.
+
+Cluster Bomb
+
+Комбинирует значения нескольких payload lists.
+
+Payloads
+
+Позволь вводить payloads вручную:
+
+123
+124
+125
+126
+
+или загружать небольшой текстовый список.
+
+Добавь ограничение количества запросов и concurrency.
+
+Например:
+
+Concurrency: 3
+Delay: 100 ms
+Maximum requests: 100
+
+По умолчанию используй очень маленький rate limit.
+
+Не реализовывай бесконтрольную отправку миллионов запросов.
+
+Intruder results
+
+После запуска показывай таблицу:
+
+#	Payload	Status	Length	Time
+1	123	200	1240	41ms
+2	124	404	312	37ms
+3	125	200	1240	39ms
+
+Добавь возможность:
+
+сортировать по status
+сортировать по length
+сортировать по response time
+открыть полный response
+повторить выбранный запрос в Repeater
+Backend proxy
+
+Важно: браузер не должен напрямую выполнять произвольные cross-origin HTTP requests.
+
+Создай backend API:
+
+POST /api/request
+
+Frontend отправляет туда структурированный объект:
+
+{
+"method": "GET",
+"url": "http://localhost:3000/api/users?id=1",
+"headers": {},
+"body": null
+}
+
+Backend выполняет HTTP request и возвращает:
+
+{
+"status": 200,
+"statusText": "OK",
+"headers": {},
+"body": "...",
+"size": 1234,
+"duration": 42
+}
+
+SSRF / security restrictions
+
+Поскольку приложение является локальным HTTP testing tool, всё равно добавь защитные ограничения.
+
+По умолчанию разрешай только:
+
+localhost
+127.0.0.1
+::1
+локальные development hosts
+
+Добавь Settings → Allowed Hosts, где пользователь явно может добавить дополнительные тестовые hosts.
+
+Не позволяй backend без явного разрешения обращаться к произвольным внешним адресам.
+
+Блокируй потенциально опасные адреса и диапазоны по умолчанию.
+
+Не принимай системные команды через HTTP API.
+
+Не используй shell execution для отправки HTTP requests.
+
+CORS
+
+Frontend должен обращаться только к собственному backend API.
+
+Настрой CORS так, чтобы development setup работал на localhost, но не создавай полностью открытый production CORS.
+
+Error handling
+
+Корректно обрабатывай:
+
+connection refused
+timeout
+invalid URL
+invalid JSON
+DNS errors
+connection reset
+HTTP 4xx
+HTTP 5xx
+
+Ошибки показывай пользователю понятно.
+
+Например:
+
+Connection failed
+Target: http://localhost:8080
+Reason: ECONNREFUSED
+
+Timeout
+
+Добавь timeout настройки:
+
+Default: 10 seconds
+
+Maximum: 60 seconds.
+
+Используй AbortController либо аналогичный механизм.
+
+Response viewer
+
+Response viewer должен поддерживать:
+
+Raw
+Pretty JSON
+Headers
+Preview
+
+Для JSON показывай:
+
+{
+"user": {
+"id": 123,
+"name": "Alice"
+}
+}
+
+с нормальной подсветкой.
+
+Если response не JSON — показывай обычный текст.
+
+UI/UX
+
+Стиль интерфейса:
+
+dark theme
+похожий на developer/security tooling
+monospace для HTTP данных
+resizable request/response panels
+удобные tabs
+keyboard shortcuts
+status indicators
+toast notifications
+
+Не копируй напрямую дизайн Burp Suite — сделай собственный интерфейс.
+
+Settings
+
+Создай страницу Settings.
+
+Настройки:
+
+Request timeout
+Maximum response size
+Default concurrency
+Default delay
+Allowed hosts
+Theme
+Clear history
+
+Добавь предупреждение:
+
+"This tool is intended for authorized security testing and local development."
+
+API
+
+Создай следующие endpoints:
+
+GET /api/health
+
+POST /api/request
+
+GET /api/history
+
+POST /api/history
+
+DELETE /api/history/:id
+
+DELETE /api/history
+
+POST /api/intruder/run
+
+GET /api/settings
+
+PUT /api/settings
+
+Добавь TypeScript types для всех request/response моделей.
+
+Architecture
+
+Раздели приложение на:
+
+client:
+
+components
+pages
+hooks
+services
+types
+utils
+
+server:
+
+routes
+services
+middleware
+validators
+security
+storage
+types
+
+Не смешивай frontend и backend логику.
+
+Validation
+
+Используй schema validation, например Zod.
+
+Проверяй:
+
+HTTP method
+URL
+headers
+body size
+timeout
+concurrency
+payload count
+allowed host
+
+Не позволяй пользователю передавать неконтролируемые значения в системные API.
+
+Limits
+
+Введи разумные defaults:
+
+MAX_RESPONSE_SIZE = 5 MB
+MAX_PAYLOADS = 1000
+MAX_CONCURRENCY = 10
+MAX_REQUEST_TIMEOUT = 60000
+DEFAULT_TIMEOUT = 10000
+DEFAULT_CONCURRENCY = 3
+DEFAULT_DELAY = 100
+
+Эти значения должны быть configurable, но нельзя полностью отключить защитные ограничения без явного действия в Settings.
+
+Testing
+
+Создай tests для backend:
+
+health endpoint
+valid GET
+valid POST
+invalid URL
+blocked host
+timeout
+malformed request
+history CRUD
+Intruder payload generation
+Sniper
+Battering Ram
+Pitchfork
+Cluster Bomb
+
+Создай frontend tests для:
+
+request editor
+response viewer
+history
+Intruder configuration
+Docker
+
+Добавь Dockerfile и docker-compose.yml.
+
+Команда запуска должна быть максимально простой:
+
+npm install
+npm run dev
+
+После запуска:
+
+Frontend:
+http://localhost:3000
+
+Backend:
+http://localhost:3001
+
+Настрой Vite proxy, чтобы frontend мог обращаться к:
+
+/api/*
+
+без необходимости указывать localhost:3001 в браузере.
+
+README
+
+Создай подробный README с:
+
+Installation
+Development
+Production build
+Architecture
+API documentation
+Repeater usage
+Intruder usage
+Security model
+Allowed Hosts
+Troubleshooting
+Важные ограничения
+
+Это должен быть инструмент для локального и авторизованного security testing.
+
+Не добавляй:
+
+credential theft
+malware
+persistence
+stealth/evasion
+массовый интернет-сканер
+автоматический поиск случайных внешних targets
+обход authentication
+эксплуатацию конкретных уязвимостей
+автоматическое получение секретов
+
+Intruder должен работать только с явно заданным пользователем target URL и payloads.
+
+Требования к реализации
+
+Не ограничивайся mockup.
+
+Создай реально работающий проект.
+
+Сначала создай структуру проекта и package.json.
+
+Затем реализуй backend.
+
+Затем frontend.
+
+Затем интеграцию.
+
+Затем tests.
+
+Затем README.
+
+После каждого крупного этапа проверяй TypeScript compilation и исправляй ошибки.
+
+Не оставляй TODO вместо основной функциональности.
+
+Если какая-либо библиотека имеет breaking changes, используй актуальный API.
+
+В конце выведи:
+
+Project structure
+Installation commands
+Development commands
+Какие файлы были созданы
+Как проверить Repeater
+Как проверить Intruder
+
+Главный критерий успеха:
+
+После npm install и npm run dev пользователь открывает localhost в браузере и получает полностью работающий локальный HTTP Repeater + ограниченный Intruder.
