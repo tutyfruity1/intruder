@@ -18,7 +18,7 @@ function requestOnce(url: URL, address: string, request: RequestInput, timeoutMs
       path: `${url.pathname}${url.search}`,
       method: request.method,
       headers: request.headers,
-      timeout: timeoutMs,
+      ...(timeoutMs > 0 ? { timeout: timeoutMs } : {}),
       rejectUnauthorized: false,
       lookup: (_hostname, _options, callback) => callback(null, address, address.includes(":") ? 6 : 4)
     };
@@ -38,9 +38,13 @@ function requestOnce(url: URL, address: string, request: RequestInput, timeoutMs
       };
       incoming.on("data", (chunk: Buffer) => {
         total += chunk.length;
-        const remaining = Math.max(0, maxResponseSize - (total - chunk.length));
-        if (remaining > 0) chunks.push(Buffer.from(chunk).subarray(0, remaining));
-        if (total > maxResponseSize) truncated = true;
+        if (maxResponseSize <= 0) {
+          chunks.push(chunk);
+        } else {
+          const remaining = Math.max(0, maxResponseSize - (total - chunk.length));
+          if (remaining > 0) chunks.push(Buffer.from(chunk).subarray(0, remaining));
+          if (total > maxResponseSize) truncated = true;
+        }
       });
       incoming.on("end", finish);
       incoming.on("aborted", finish);

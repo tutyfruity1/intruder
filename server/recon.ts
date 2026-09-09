@@ -47,27 +47,31 @@ export async function createReconRun(store: JsonStore, mode: ReconMode, body: an
 }
 
 export async function runActiveRecon(store: JsonStore, run: ReconRun, settings: SecuritySettings) {
-  const initial = await store.recon(run.id);
-  if (initial?.status === "cancelled") return;
-  run.status = "running"; run.updatedAt = new Date().toISOString(); await store.updateRecon(run);
   try {
-    for (const raw of run.urls) {
-      const current = await store.recon(run.id);
-      if (current?.status === "cancelled") return;
-      const url = validateRequestUrl(raw, settings);
-      await resolveAllowedHost(url, settings);
-      const request: RequestInput = { method: "GET", url: raw, headers: {} };
-      try {
-        const response = await executeRequest(request, store);
-        run.findings.push({ kind: "profile", value: `${url.origin} status=${response.status} content-type=${response.headers["content-type"] || "unknown"}` });
-      } catch (error) {
-        run.findings.push({ kind: "profile", value: `${url.origin} error=${redact(error instanceof Error ? error.message : "request failed")}` });
+    const initial = await store.recon(run.id);
+    if (initial?.status === "cancelled") return;
+    run.status = "running"; run.updatedAt = new Date().toISOString(); await store.updateRecon(run);
+    try {
+      for (const raw of run.urls) {
+        const current = await store.recon(run.id);
+        if (current?.status === "cancelled") return;
+        const url = validateRequestUrl(raw, settings);
+        await resolveAllowedHost(url, settings);
+        const request: RequestInput = { method: "GET", url: raw, headers: {} };
+        try {
+          const response = await executeRequest(request, store);
+          run.findings.push({ kind: "profile", value: `${url.origin} status=${response.status} content-type=${response.headers["content-type"] || "unknown"}` });
+        } catch (error) {
+          run.findings.push({ kind: "profile", value: `${url.origin} error=${redact(error instanceof Error ? error.message : "request failed")}` });
+        }
+        run.updatedAt = new Date().toISOString(); await store.updateRecon(run);
       }
-      run.updatedAt = new Date().toISOString(); await store.updateRecon(run);
+      run.status = "completed";
+    } catch (error) {
+      run.status = "failed"; run.error = redact(error instanceof Error ? error.message : "recon failed");
     }
-    run.status = "completed";
-  } catch (error) {
-    run.status = "failed"; run.error = redact(error instanceof Error ? error.message : "recon failed");
+    run.updatedAt = new Date().toISOString(); await store.updateRecon(run);
+  } catch {
+    /* ignore background recon persistence errors on shutdown */
   }
-  run.updatedAt = new Date().toISOString(); await store.updateRecon(run);
 }
