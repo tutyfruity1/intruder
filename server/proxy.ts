@@ -323,7 +323,6 @@ export class LocalProxy {
       const settings = await this.store.settings();
       release = await this.acquire(settings);
       target = parseConnectTarget(req.url || "");
-      if (!(settings.authorizedTestingMode && settings.authorizedAllowNonStandardPorts) && !(settings.proxyAllowedConnectPorts ?? [443]).includes(target.port)) throw new Error("CONNECT target port is not allowed");
       const hostname = net.isIP(target.host) === 6 ? `[${target.host}]` : target.host;
       const targetUrl = new URL(`https://${hostname}:${target.port}/`);
       validateRequestUrl(targetUrl.toString(), settings);

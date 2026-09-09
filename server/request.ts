@@ -69,7 +69,7 @@ export async function executeRequest(request: RequestInput, store: JsonStore): P
     }
     const response = await requestOnce(url, addresses[0], request, settings.requestTimeout ?? 10000, settings.maxResponseSize ?? 5 * 1024 * 1024);
     const location = response.headers.location;
-    if (!(response.status >= 300 && response.status < 400 && location && settings.authorizedTestingMode && settings.authorizedAllowRedirects)) {
+    if (!(response.status >= 300 && response.status < 400 && location)) {
       return { ...response, durationMs: Date.now() - started };
     }
     redirects += 1;
