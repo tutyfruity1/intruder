@@ -249,7 +249,7 @@ export class LocalProxy {
     await resolveAllowedHost(validateRequestUrl(request.url, settings), settings);
     const taken = this.takePending(id);
     try {
-      const response = await executeRequest(request, this.store);
+      const response = await executeRequest(request, this.store, { followRedirects: false });
       const item: TrafficItem = { id: taken.id, createdAt: taken.createdAt, source: "proxy", kind: "http", request, originalRequest: taken.originalRequest, response, interceptionStatus: "continued" };
       await this.store.addTraffic(item);
       taken.response.writeHead(response.status, response.statusText, responseHeaders(response));
@@ -321,7 +321,7 @@ export class LocalProxy {
         return;
       }
 
-      const response = await executeRequest(request, this.store);
+      const response = await executeRequest(request, this.store, { followRedirects: false });
       const item: TrafficItem = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), source: "proxy", kind: "http", request, response };
       await this.store.addTraffic(item);
       res.writeHead(response.status, response.statusText, responseHeaders(response));
@@ -360,7 +360,7 @@ export class LocalProxy {
         release = undefined;
         return;
       }
-      const response = await executeRequest(request, this.store);
+      const response = await executeRequest(request, this.store, { followRedirects: false });
       const item: TrafficItem = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), source: "proxy", kind: "http", request, response };
       await this.store.addTraffic(item);
       res.writeHead(response.status, response.statusText, responseHeaders(response));

@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
 import { DEFAULT_SETTINGS, sanitizeSettings, type SecuritySettings } from "./security.js";
@@ -9,12 +10,24 @@ export class JsonStore {
   private async read<T>(file: string, fallback: T): Promise<T> {
     try { return JSON.parse(await fs.readFile(path.join(this.directory, file), "utf8")) as T; } catch { return fallback; }
   }
+  private writeQueues = new Map<string, Promise<void>>();
+
   private async write(file: string, data: unknown) {
-    await fs.mkdir(this.directory, { recursive: true });
-    const target = path.join(this.directory, file);
-    const temp = `${target}.next`;
-    await fs.writeFile(temp, JSON.stringify(data, null, 2), "utf8");
-    await fs.rename(temp, target);
+    const queue = this.writeQueues.get(file) || Promise.resolve();
+    const next = queue.then(async () => {
+      await fs.mkdir(this.directory, { recursive: true });
+      const target = path.join(this.directory, file);
+      const temp = `${target}.${crypto.randomUUID()}.tmp`;
+      try {
+        await fs.writeFile(temp, JSON.stringify(data, null, 2), "utf8");
+        await fs.rename(temp, target);
+      } catch (err) {
+        try { await fs.unlink(temp); } catch {}
+        throw err;
+      }
+    });
+    this.writeQueues.set(file, next.catch(() => {}));
+    return next;
   }
   async settings() {
     const envPort = Number(process.env.PROXY_PORT);
