@@ -144,6 +144,66 @@ function SimpleRequestEditor({ value, onChange, onSend, loading, lang }: { value
   </div>;
 }
 
+function RequestEditor({ value, onChange, onSend, loading, lang }: { value: RequestInput; onChange: (v: RequestInput) => void; onSend: () => void; loading: boolean; lang: Language }) {
+  const t = translations[lang].repeater;
+  const [view, setView] = useState<"structured" | "raw">("structured");
+  const [rawText, setRawText] = useState("");
+  const [pairs, setPairs] = useState<HeaderPair[]>(Object.entries(value.headers).map(([key, val]) => ({ key, value: val })) || [blankPair()]);
+  const [queryPairs, setQueryPairs] = useState<HeaderPair[]>(queryPairsFromUrl(value.url));
+  const [cookiePairs, setCookiePairs] = useState<HeaderPair[]>(cookiePairsFromHeaders(value.headers));
+  useEffect(() => setPairs(Object.entries(value.headers).map(([key, val]) => ({ key, value: val })).concat(Object.keys(value.headers).length ? [] : [blankPair()])), [value.headers]);
+  useEffect(() => setQueryPairs(queryPairsFromUrl(value.url)), [value.url]);
+  useEffect(() => setCookiePairs(cookiePairsFromHeaders(value.headers)), [value.headers]);
+  const update = (patch: Partial<RequestInput>) => onChange({ ...value, ...patch });
+  const raw = requestToRaw(value);
+  useEffect(() => { if (view === "structured") setRawText(raw); }, [raw, view]);
+  const parseRaw = (text: string) => {
+    const parsed = parseRawRequest(text);
+    if (parsed) onChange(parsed);
+  };
+  return <div className="space-y-4">
+    <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+      <div className="flex gap-1">
+        <button className={`rounded px-2 py-1 text-xs ${view === "structured" ? "bg-slate-700 text-white" : "text-slate-500"}`} onClick={() => setView("structured")}>Structured</button>
+        <button className={`rounded px-2 py-1 text-xs ${view === "raw" ? "bg-slate-700 text-white" : "text-slate-500"}`} onClick={() => { setRawText(raw); setView("raw"); }}>Raw</button>
+      </div>
+      <div className="flex items-center gap-2">
+        <button className="btn-primary px-3 py-1 text-xs" disabled={loading} onClick={onSend}>{loading ? t.sending : t.send}</button>
+      </div>
+    </div>
+    {view === "raw" ? (
+      <textarea className="field min-h-[26rem] w-full font-mono text-xs leading-5" value={rawText || raw} onChange={(event) => { setRawText(event.target.value); parseRaw(event.target.value); }} spellCheck={false} />
+    ) : (
+      <>
+        <div className="grid grid-cols-[110px_1fr_auto] gap-2">
+          <select className="field method-select appearance-none border-emerald-400 bg-emerald-950/50 text-emerald-100 focus:border-emerald-300 focus:ring-emerald-300" value={value.method} onChange={(e) => update({ method: e.target.value as HttpMethod })}>{methods.map((m) => <option key={m}>{m}</option>)}</select>
+          <input className="field" value={value.url} onChange={(e) => update({ url: e.target.value })} placeholder="https://example.com/api/data" />
+          <button className="btn-primary min-w-20" disabled={loading} onClick={onSend}>{loading ? t.sending : t.send}</button>
+        </div>
+        <div>
+          <div className="mb-1 flex items-center justify-between"><span className="label mb-0">{t.queryParameters}</span><button className="text-xs text-teal-300" onClick={() => setQueryPairs([...queryPairs, blankPair()])}>{t.add}</button></div>
+          <div className="space-y-2">{queryPairs.map((pair, i) => <div className="grid grid-cols-[1fr_1fr_auto] gap-2" key={i}><input className="field" placeholder={t.paramName} value={pair.key} onChange={(e) => { const next = [...queryPairs]; next[i] = { ...pair, key: e.target.value }; setQueryPairs(next); update({ url: urlWithQueryPairs(value.url, next) }); }} /><input className="field" placeholder={t.paramValue} value={pair.value} onChange={(e) => { const next = [...queryPairs]; next[i] = { ...pair, value: e.target.value }; setQueryPairs(next); update({ url: urlWithQueryPairs(value.url, next) }); }} /><button className="px-2 text-slate-500 hover:text-red-300" onClick={() => { const next = queryPairs.filter((_, j) => i !== j); setQueryPairs(next); update({ url: urlWithQueryPairs(value.url, next) }); }}>×</button></div>)}</div>
+        </div>
+        <div>
+          <div className="mb-1 flex items-center justify-between"><span className="label mb-0">{t.headers}</span><button className="text-xs text-teal-300" onClick={() => setPairs([...pairs, blankPair()])}>{t.add}</button></div>
+          <div className="space-y-2">{pairs.map((pair, i) => <div className="grid grid-cols-[1fr_1fr_auto] gap-2" key={i}><input className="field" placeholder={t.headerName} value={pair.key} onChange={(e) => { const next = [...pairs]; next[i] = { ...pair, key: e.target.value }; setPairs(next); update({ headers: pairsToHeaders(next) }); }} /><input className="field" placeholder={t.headerValue} value={pair.value} onChange={(e) => { const next = [...pairs]; next[i] = { ...pair, value: e.target.value }; setPairs(next); update({ headers: pairsToHeaders(next) }); }} /><button className="px-2 text-slate-500 hover:text-red-300" onClick={() => { const next = pairs.filter((_, j) => i !== j); setPairs(next); update({ headers: pairsToHeaders(next) }); }}>×</button></div>)}</div>
+        </div>
+        <div>
+          <div className="mb-1 flex items-center justify-between"><span className="label mb-0">{t.cookies}</span><button className="text-xs text-teal-300" onClick={() => setCookiePairs([...cookiePairs, blankPair()])}>{t.add}</button></div>
+          <div className="space-y-2">{cookiePairs.map((pair, i) => <div className="grid grid-cols-[1fr_1fr_auto] gap-2" key={i}><input className="field" placeholder={t.cookieName} value={pair.key} onChange={(e) => { const next = [...cookiePairs]; next[i] = { ...pair, key: e.target.value }; setCookiePairs(next); update({ headers: headersWithCookies(value.headers, next) }); }} /><input className="field" placeholder={t.cookieValue} value={pair.value} onChange={(e) => { const next = [...cookiePairs]; next[i] = { ...pair, value: e.target.value }; setCookiePairs(next); update({ headers: headersWithCookies(value.headers, next) }); }} /><button className="px-2 text-slate-500 hover:text-red-300" onClick={() => { const next = cookiePairs.filter((_, j) => i !== j); setCookiePairs(next); update({ headers: headersWithCookies(value.headers, next) }); }}>×</button></div>)}</div>
+        </div>
+        <div>
+          <div className="mb-1 flex items-center justify-between">
+            <label className="label mb-0">{t.body}</label>
+            <button className="text-xs text-teal-300" onClick={() => { try { if (value.body) update({ body: JSON.stringify(JSON.parse(value.body), null, 2) }); } catch {} }}>Format JSON</button>
+          </div>
+          <textarea className="field min-h-32 font-mono text-xs" value={value.body || ""} onChange={(e) => update({ body: e.target.value })} placeholder='{"hello":"world"}' />
+        </div>
+      </>
+    )}
+  </div>;
+}
+
 function Repeater({ loadedRequest, lang }: { loadedRequest?: RequestInput; lang: Language }) {
   const t = translations[lang].repeater;
   const [request, setRequest] = useState<RequestInput>(loadedRequest || { method: "GET", url: "http://localhost:3001/api/health", headers: {} });
@@ -151,7 +211,7 @@ function Repeater({ loadedRequest, lang }: { loadedRequest?: RequestInput; lang:
   useEffect(() => { if (loadedRequest) { setRequest(loadedRequest); setResponse(undefined); setError(""); } }, [loadedRequest]);
   useEffect(() => { const handler = (event: KeyboardEvent) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") { event.preventDefault(); void send(); } }; window.addEventListener("keydown", handler); return () => window.removeEventListener("keydown", handler); });
   const send = async () => { setLoading(true); setError(""); setResponse(undefined); try { setResponse((await api.request(request)).response); } catch (e) { setError((e as Error).message); } finally { setLoading(false); } };
-  return <div className="grid gap-4 lg:grid-cols-2"><section className="card"><h2 className="mb-4 text-lg font-semibold">{t.httpRequest}</h2><SimpleRequestEditor value={request} onChange={setRequest} onSend={send} loading={loading} lang={lang} /></section><section className="card"><h2 className="mb-4 text-lg font-semibold">{t.response}</h2><ResponsePanel response={response} error={error} requestUrl={request.url} lang={lang} /></section></div>;
+  return <div className="grid gap-4 lg:grid-cols-2"><section className="card"><h2 className="mb-4 text-lg font-semibold">{t.httpRequest}</h2><RequestEditor value={request} onChange={setRequest} onSend={send} loading={loading} lang={lang} /></section><section className="card"><h2 className="mb-4 text-lg font-semibold">{t.response}</h2><ResponsePanel response={response} error={error} requestUrl={request.url} lang={lang} /></section></div>;
 }
 
 function InterceptionPanel({ onLoad, onIntruder, lang }: { onLoad: (request: RequestInput) => void; onIntruder: (request: RequestInput) => void; lang: Language }) {
