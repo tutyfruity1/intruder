@@ -86,4 +86,17 @@ describe("local HTTP proxy", () => {
     expect(status.running).toBe(true);
     expect(status.port).toBe(proxyPort);
   });
+
+  it("serves CA certificate on /ca.crt", async () => {
+    const directory = `data-test-proxy-ca-${process.pid}-${Date.now()}`;
+    stores.push(directory);
+    const proxy = new LocalProxy(new JsonStore(directory));
+    servers.push(proxy);
+    const proxyPort = await freePort();
+    await proxy.start(proxyPort);
+
+    const result = await request(proxyPort, "GET", "/ca.crt");
+    expect(result.status).toBe(200);
+    expect(result.body).toContain("BEGIN CERTIFICATE");
+  });
 });

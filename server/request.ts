@@ -18,7 +18,7 @@ function requestOnce(url: URL, address: string, request: RequestInput, timeoutMs
       path: `${url.pathname}${url.search}`,
       method: request.method,
       headers: request.headers,
-      timeout: timeoutMs,
+      ...(timeoutMs > 0 ? { timeout: timeoutMs } : {}),
       rejectUnauthorized: false,
       lookup: (_hostname, _options, callback) => callback(null, address, address.includes(":") ? 6 : 4)
     };
@@ -38,9 +38,13 @@ function requestOnce(url: URL, address: string, request: RequestInput, timeoutMs
       };
       incoming.on("data", (chunk: Buffer) => {
         total += chunk.length;
-        const remaining = Math.max(0, maxResponseSize - (total - chunk.length));
-        if (remaining > 0) chunks.push(Buffer.from(chunk).subarray(0, remaining));
-        if (total > maxResponseSize) truncated = true;
+        if (maxResponseSize <= 0) {
+          chunks.push(chunk);
+        } else {
+          const remaining = Math.max(0, maxResponseSize - (total - chunk.length));
+          if (remaining > 0) chunks.push(Buffer.from(chunk).subarray(0, remaining));
+          if (total > maxResponseSize) truncated = true;
+        }
       });
       incoming.on("end", finish);
       incoming.on("aborted", finish);
@@ -53,11 +57,19 @@ function requestOnce(url: URL, address: string, request: RequestInput, timeoutMs
   });
 }
 
-export async function executeRequest(request: RequestInput, store: JsonStore): Promise<ResponseData> {
+export interface RequestOptions {
+  followRedirects?: boolean;
+}
+
+export async function executeRequest(request: RequestInput, store: JsonStore, options: RequestOptions = {}): Promise<ResponseData> {
   const settings = await store.settings();
-  let url = validateRequestUrl(request.url, settings);
+  const shouldFollowRedirects = options.followRedirects ?? true;
+  let currentRequest: RequestInput = { ...request, headers: { ...request.headers } };
+  let url = validateRequestUrl(currentRequest.url, settings);
   let redirects = 0;
+  const maxRedirects = settings.maxRedirects ?? 10;
   const started = Date.now();
+
   while (true) {
     let addresses: string[];
     try {
@@ -68,13 +80,39 @@ export async function executeRequest(request: RequestInput, store: JsonStore): P
       await store.addAudit({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), action: "block", url: url.toString(), reason, mode: settings.authorizedTestingMode ? "authorized" : "safe" });
       throw error;
     }
-    const response = await requestOnce(url, addresses[0], request, settings.requestTimeout ?? 10000, settings.maxResponseSize ?? 5 * 1024 * 1024);
+
+    const response = await requestOnce(url, addresses[0], currentRequest, settings.requestTimeout ?? 30000, settings.maxResponseSize ?? 50 * 1024 * 1024);
     const location = response.headers.location;
-    if (!(response.status >= 300 && response.status < 400 && location)) {
+
+    if (!shouldFollowRedirects || !(response.status >= 300 && response.status < 400 && location) || redirects >= maxRedirects) {
       return { ...response, durationMs: Date.now() - started };
     }
+
     redirects += 1;
-    if (redirects > (settings.maxRedirects ?? 5)) throw new Error("Redirect chain exceeds the configured maximum");
-    url = validateRequestUrl(new URL(location, url).toString(), settings);
+    const nextUrl = new URL(location, url);
+    url = validateRequestUrl(nextUrl.toString(), settings);
+
+    const nextHeaders = { ...currentRequest.headers };
+    for (const key of Object.keys(nextHeaders)) {
+      if (key.toLowerCase() === "host") delete nextHeaders[key];
+    }
+
+    let nextMethod = currentRequest.method;
+    let nextBody = currentRequest.body;
+
+    if (response.status === 303 || ((response.status === 301 || response.status === 302) && currentRequest.method === "POST")) {
+      nextMethod = "GET";
+      nextBody = undefined;
+      for (const key of Object.keys(nextHeaders)) {
+        if (key.toLowerCase() === "content-type" || key.toLowerCase() === "content-length") delete nextHeaders[key];
+      }
+    }
+
+    currentRequest = {
+      method: nextMethod,
+      url: url.toString(),
+      headers: nextHeaders,
+      ...(nextBody !== undefined ? { body: nextBody } : {})
+    };
   }
 }

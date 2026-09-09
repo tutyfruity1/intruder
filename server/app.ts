@@ -52,6 +52,12 @@ export function createApp(store = new JsonStore()) {
     await store.deleteHistory(req.params.id);
     res.json({ ok: true });
   } catch (e) { next(e); } });
+  app.get(["/api/proxy/ca.crt", "/api/ca.crt"], (_req, res) => {
+    const pem = proxy.getCaCertPem();
+    res.setHeader("content-type", "application/x-x509-ca-cert");
+    res.setHeader("content-disposition", 'attachment; filename="local-http-lab-ca.crt"');
+    res.send(pem);
+  });
   app.get("/api/proxy/status", async (_req, res, next) => {
     try {
       const current = proxy.status();

@@ -1,11 +1,13 @@
 import http from "node:http";
 import crypto from "node:crypto";
 import net from "node:net";
+import tls from "node:tls";
 import type { IncomingMessage, ServerResponse } from "node:http";
 import { executeRequest, MAX_BODY } from "./request.js";
 import { resolveAllowedHost, validateRequestUrl } from "./security.js";
 import { JsonStore } from "./store.js";
 import type { HttpMethod, RequestInput, TrafficItem } from "./types.js";
+import { CaManager } from "./ca.js";
 
 const methods = new Set<HttpMethod>(["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]);
 const hopByHop = new Set(["connection", "content-length", "transfer-encoding", "proxy-connection", "proxy-authorization", "proxy-authenticate", "keep-alive", "te", "trailer", "upgrade", "host"]);
@@ -102,13 +104,24 @@ interface PendingEntry extends PendingInterceptedRequest {
 
 export class LocalProxy {
   private server?: http.Server;
+  private mitmHttpServer: http.Server;
+  private caManager: CaManager;
   private configuredPort = 3002;
   private activePort = 3002;
   private pending = new Map<string, PendingEntry>();
   private active = 0;
   private requestTimes: number[] = [];
   private sockets = new Set<net.Socket>();
-  constructor(private readonly store: JsonStore) {}
+  constructor(private readonly store: JsonStore) {
+    this.caManager = new CaManager(this.store.directory);
+    this.mitmHttpServer = http.createServer((req, res) => {
+      void this.handleMitm(req, res);
+    });
+  }
+
+  getCaCertPem(): string {
+    return this.caManager.getCaCertPem();
+  }
 
   async interceptionStatus() {
     const settings = await this.store.settings();
@@ -236,7 +249,7 @@ export class LocalProxy {
     await resolveAllowedHost(validateRequestUrl(request.url, settings), settings);
     const taken = this.takePending(id);
     try {
-      const response = await executeRequest(request, this.store);
+      const response = await executeRequest(request, this.store, { followRedirects: false });
       const item: TrafficItem = { id: taken.id, createdAt: taken.createdAt, source: "proxy", kind: "http", request, originalRequest: taken.originalRequest, response, interceptionStatus: "continued" };
       await this.store.addTraffic(item);
       taken.response.writeHead(response.status, response.statusText, responseHeaders(response));
@@ -282,7 +295,58 @@ export class LocalProxy {
     });
   }
 
+  private async handleMitm(req: IncomingMessage, res: ServerResponse) {
+    let request: RequestInput | undefined;
+    let release: (() => void) | undefined;
+    try {
+      const settings = await this.store.settings();
+      release = await this.acquire(settings);
+      const hostHeader = req.headers.host || "";
+      if (!hostHeader) throw new Error("Host header is required for HTTPS request");
+      const rawUrl = req.url || "/";
+      const fullUrl = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${hostHeader}${rawUrl}`;
+      const body = await readBody(req);
+      request = {
+        method: (req.method as HttpMethod) || "GET",
+        url: fullUrl,
+        headers: headersFromRequest(req),
+        ...(body !== undefined ? { body } : {})
+      };
+      validateRequestUrl(request.url, settings);
+      await resolveAllowedHost(new URL(request.url), settings);
+
+      if (settings.interceptEnabled) {
+        await this.enqueue(request, request, res, settings, release);
+        release = undefined;
+        return;
+      }
+
+      const response = await executeRequest(request, this.store, { followRedirects: false });
+      const item: TrafficItem = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), source: "proxy", kind: "http", request, response };
+      await this.store.addTraffic(item);
+      res.writeHead(response.status, response.statusText, responseHeaders(response));
+      res.end(response.body);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "MITM proxy request failed";
+      if (request) await this.store.addTraffic({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), source: "proxy", kind: "http", request, error: message });
+      writeError(res, 502, message);
+    } finally {
+      release?.();
+    }
+  }
+
   private async handle(req: IncomingMessage, res: ServerResponse) {
+    if (req.url === "/ca.crt" || req.url === "http://http.lab/ca.crt" || req.url === "http://local-http-lab/ca.crt" || req.url?.endsWith("/ca.crt")) {
+      const pem = this.caManager.getCaCertPem();
+      res.writeHead(200, {
+        "content-type": "application/x-x509-ca-cert",
+        "content-disposition": "attachment; filename=\"local-http-lab-ca.crt\"",
+        "content-length": Buffer.byteLength(pem)
+      });
+      res.end(pem);
+      return;
+    }
+
     let request: RequestInput | undefined;
     let release: (() => void) | undefined;
     try {
@@ -296,7 +360,7 @@ export class LocalProxy {
         release = undefined;
         return;
       }
-      const response = await executeRequest(request, this.store);
+      const response = await executeRequest(request, this.store, { followRedirects: false });
       const item: TrafficItem = { id: crypto.randomUUID(), createdAt: new Date().toISOString(), source: "proxy", kind: "http", request, response };
       await this.store.addTraffic(item);
       res.writeHead(response.status, response.statusText, responseHeaders(response));
@@ -316,57 +380,44 @@ export class LocalProxy {
   }
 
   private async handleConnect(req: IncomingMessage, socket: net.Socket, head: Buffer) {
-    const startedAt = new Date().toISOString();
     let target: { host: string; port: number } | undefined;
-    let release: (() => void) | undefined;
     try {
       const settings = await this.store.settings();
-      release = await this.acquire(settings);
       target = parseConnectTarget(req.url || "");
       const hostname = net.isIP(target.host) === 6 ? `[${target.host}]` : target.host;
       const targetUrl = new URL(`https://${hostname}:${target.port}/`);
       validateRequestUrl(targetUrl.toString(), settings);
-      const addresses = await resolveAllowedHost(targetUrl, settings);
-      const address = addresses[0];
-      const upstream = net.connect({ host: address, port: target.port });
-      this.sockets.add(upstream);
-      upstream.once("close", () => this.sockets.delete(upstream));
-      const timeout = setTimeout(() => upstream.destroy(new Error("CONNECT connection timed out")), settings.proxyConnectionTimeout ?? 10000);
-      let connected = false;
-      let finalized = false;
-      let bytesSent = head.length;
-      let bytesReceived = 0;
-      const request: RequestInput = { method: "CONNECT", url: targetUrl.toString(), headers: { host: `${target.host}:${target.port}` } };
-      const finish = async (error?: string) => {
-        if (finalized) return;
-        finalized = true;
-        clearTimeout(timeout);
-        const tunnel: TrafficItem["tunnel"] = { target: `${target!.host}:${target!.port}`, port: target!.port, connected, startedAt, endedAt: new Date().toISOString(), bytesSent, bytesReceived };
-        await this.store.addTraffic({ id: crypto.randomUUID(), createdAt: startedAt, source: "proxy", kind: "https-tunnel", request, tunnel, ...(error ? { error } : {}) });
-        release?.();
-        release = undefined;
-      };
-      upstream.on("connect", () => {
-        connected = true;
-        socket.write("HTTP/1.1 200 Connection Established\r\nConnection: keep-alive\r\n\r\n");
-        if (head.length) upstream.write(head);
-        socket.on("data", (chunk) => { bytesSent += chunk.length; });
-        upstream.on("data", (chunk) => { bytesReceived += chunk.length; });
-        socket.pipe(upstream);
-        upstream.pipe(socket);
+      await resolveAllowedHost(targetUrl, settings);
+
+      socket.write("HTTP/1.1 200 Connection Established\r\nConnection: keep-alive\r\n\r\n");
+
+      const defaultHost = target.host;
+      const tlsServer = tls.createServer({
+        SNICallback: (servername, cb) => {
+          try {
+            const host = servername || defaultHost;
+            const ctx = this.caManager.getSecureContext(host);
+            cb(null, ctx);
+          } catch (err) {
+            cb(err as Error);
+          }
+        }
+      }, (tlsSocket) => {
+        this.sockets.add(tlsSocket);
+        tlsSocket.once("close", () => this.sockets.delete(tlsSocket));
+        this.mitmHttpServer.emit("connection", tlsSocket);
       });
-      upstream.once("error", (error) => { if (!socket.destroyed) writeSocketError(socket, 502, error.message); void finish(error.message); });
-      upstream.once("close", () => { if (!socket.destroyed) socket.end(); void finish(); });
-      socket.once("error", () => upstream.destroy());
-      socket.once("close", () => { if (!upstream.destroyed) upstream.destroy(); });
+
+      this.sockets.add(socket);
+      socket.once("close", () => this.sockets.delete(socket));
+
+      tlsServer.emit("connection", socket);
+      if (head && head.length > 0) {
+        socket.unshift(head);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "CONNECT request failed";
-      const request: RequestInput = { method: "CONNECT", url: target ? `https://${target.host}:${target.port}/` : `https://${req.url || "unknown"}`, headers: { host: req.headers.host || req.url || "" } };
-      await this.store.addTraffic({ id: crypto.randomUUID(), createdAt: startedAt, source: "proxy", kind: "https-tunnel", request, tunnel: target ? { target: `${target.host}:${target.port}`, port: target.port, connected: false, startedAt, endedAt: new Date().toISOString(), bytesSent: 0, bytesReceived: 0 } : undefined, error: message });
-      const settings = await this.store.settings();
-      await this.store.addAudit({ id: crypto.randomUUID(), createdAt: new Date().toISOString(), action: "block", url: request.url, reason: message, mode: settings.authorizedTestingMode ? "authorized" : "safe" });
-      writeSocketError(socket, /rate limit/i.test(message) ? 429 : /concurrency/i.test(message) ? 503 : 501, `CONNECT blocked; HTTPS interception is disabled (${message})`);
-      release?.();
+      writeSocketError(socket, 502, `CONNECT blocked: ${message}`);
     }
   }
 }
